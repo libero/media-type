@@ -8,16 +8,14 @@ use Libero\MediaType\Exception\InvalidMediaType;
 use LogicException;
 use OutOfBoundsException;
 use function addcslashes;
-use function is_callable;
-use function mb_strlen;
 use function mb_strtolower;
 use function mb_substr;
 use function preg_match;
+use function rtrim;
+use function trim;
 
 final class MediaType
 {
-    private const HTTP_WHITESPACE = [' ', "\t", "\n", "\r"];
-
     private $type;
     private $subType;
     private $parameters;
@@ -32,21 +30,20 @@ final class MediaType
         $this->parameters = $parameters;
     }
 
-    public static function fromString(string $input) : MediaType
+    public static function fromString(string $string) : MediaType
     {
         // 1. Remove any leading and trailing HTTP whitespace from input.
 
-        $input = multi_trim($input, ...self::HTTP_WHITESPACE);
+        $string = trim($string, " \t\n\r");
 
         // 2. Let position be a position variable for input, initially pointing at the start of input.
 
-        $position = 0;
-        $length = mb_strlen($input);
+        $input = new StringIterator($string);
 
         // 3. Let type be the result of collecting a sequence of code points that are not U+002F (/) from input, given
         // position.
 
-        $type = self::collectSequence($input, $position, string_will_be('/'));
+        $type = $input->sliceUntil(is('/'));
 
         // 4. If type is the empty string or does not solely contain HTTP token code points, then return failure.
 
@@ -60,22 +57,22 @@ final class MediaType
 
         // 5. If position is past the end of input, then return failure.
 
-        if ($position >= $length) {
+        if (!$input->valid()) {
             throw new InvalidMediaType('No subtype');
         }
 
         // 6. Advance position by 1. (This skips past U+002F (/).)
 
-        $position++;
+        $input->next();
 
         // 7. Let subtype be the result of collecting a sequence of code points that are not U+003B (;) from input,
         // given position.
 
-        $subType = self::collectSequence($input, $position, string_will_be(';'));
+        $subType = $input->sliceUntil(is(';'));
 
         // 8. Remove any trailing HTTP whitespace from subtype.
 
-        $subType = multi_rtrim($subType, ...self::HTTP_WHITESPACE);
+        $subType = rtrim($subType, " \t\n\r");
 
         // 9. If subtype is the empty string or does not solely contain HTTP token code points, then return failure.
 
@@ -96,21 +93,19 @@ final class MediaType
 
         // 11. While position is not past the end of input:
 
-        while ($position < $length) {
+        while ($input->valid()) {
             // 11.1. Advance position by 1. (This skips past U+003B (;).)
 
-            $position++;
+            $input->next();
 
             // 11.2. Collect a sequence of code points that are HTTP whitespace from input given position.
 
-            while ($position < $length && string_is(get_character($input, $position), ...self::HTTP_WHITESPACE)) {
-                $position++;
-            }
+            $input->sliceUntil(not(is(' ', "\t", "\n", "\r")));
 
             // 11.3. Let parameterName be the result of collecting a sequence of code points that are not U+003B (;) or
             // U+003D (=) from input, given position.
 
-            $parameterName = self::collectSequence($input, $position, string_will_be(';', '='));
+            $parameterName = $input->sliceUntil(is(';', '='));
 
             // 11.4. Set parameterName to parameterName, in ASCII lowercase.
 
@@ -118,21 +113,19 @@ final class MediaType
 
             // 11.5. If position is not past the end of input, then:
 
-            if ($position < $length) {
+            if ($input->valid()) {
                 // 11.5.1. If the code point at position within input is U+003B (;), then continue.
 
-                if (';' === get_character($input, $position)) {
+                if (';' === $input->current()) {
                     continue;
                 }
 
                 // 11.5.2 Advance position by 1. (This skips past U+003D (=).)
 
-                $position++;
-            }
+                $input->next();
+            } else {
+                // 11.6. If position is past the end of input, then break.
 
-            // 11.6. If position is past the end of input, then break.
-
-            if ($position >= $length) {
                 break;
             }
 
@@ -142,26 +135,26 @@ final class MediaType
 
             // 11.8. If the code point at position within input is U+0022 ("), then:
 
-            if ('"' === get_character($input, $position)) {
+            if ('"' === $input->current()) {
                 // 11.8.1. Set parameterValue to the result of collecting an HTTP quoted string from input, given
                 // position and the extract-value flag.
 
-                $parameterValue = self::collectAnHttpQuotedString($input, $position, true);
+                $parameterValue = self::collectAnHttpQuotedString($input, true);
 
                 // 11.8.2. Collect a sequence of code points that are not U+003B (;) from input, given position.
 
-                self::collectSequence($input, $position, string_will_be(';'));
+                $input->sliceUntil(is(';'));
             } else {
                 // 11.9. Otherwise:
 
                 // 11.9.1. Set parameterValue to the result of collecting a sequence of code points that are not
                 // U+003B (;) from input, given position.
 
-                $parameterValue = self::collectSequence($input, $position, string_will_be(';'));
+                $parameterValue = $input->sliceUntil(is(';'));
 
                 // 11.9.2. Remove any trailing HTTP whitespace from parameterValue.
 
-                $parameterValue = multi_rtrim($parameterValue, ...self::HTTP_WHITESPACE);
+                $parameterValue = rtrim($parameterValue, " \t\n\r");
 
                 // 11.9.3. If parameterValue is the empty string, then continue.
 
@@ -270,43 +263,11 @@ final class MediaType
         return $this->parameters[$name];
     }
 
-    private static function collectSequence(string $input, int &$position, ?callable $until = null) : string
+    private static function collectAnHttpQuotedString(StringIterator $input, bool $extractValue = false) : string
     {
-        if (!is_callable($until)) {
-            $position = mb_strlen($input);
-
-            return mb_substr($input, $position);
-        }
-
-        $value = '';
-        while (true) {
-            try {
-                $character = get_character($input, $position);
-            } catch (OutOfBoundsException $e) {
-                break;
-            }
-
-            if (true === $until($character)) {
-                break;
-            }
-
-            $value .= $character;
-            $position++;
-        }
-
-        return $value;
-    }
-
-    private static function collectAnHttpQuotedString(
-        string $input,
-        int &$position,
-        bool $extractValue = false
-    ) : string {
-        $length = mb_strlen($input);
-
         // 1. Let positionStart be position.
 
-        $positionStart = $position;
+        $positionStart = $input->key();
 
         // 2. Let value be the empty string.
 
@@ -314,13 +275,13 @@ final class MediaType
 
         // 3. Assert: the code point at position within input is U+0022 (").
 
-        if ('"' !== get_character($input, $position)) {
+        if ('"' !== $input->current()) {
             throw new LogicException('Expected a quote');
         }
 
         // 4. Advance position by 1.
 
-        $position++;
+        $input->next();
 
         // 5. While true:
 
@@ -328,39 +289,39 @@ final class MediaType
             // 5.1. Append the result of collecting a sequence of code points that are not U+0022 (") or U+005C (\) from
             // input, given position, to value.
 
-            $value .= self::collectSequence($input, $position, string_will_be('"', '\\'));
+            $value .= $input->sliceUntil(is('"', '\\'));
 
             // 5.2. If position is past the end of input, then break.
 
-            if ($position >= $length) {
+            if (!$input->valid()) {
                 break;
             }
 
             // 5.3. Let quoteOrBackslash be the code point at position within input.
 
-            $quoteOrBackslash = get_character($input, $position);
+            $quoteOrBackslash = $input->current();
 
             // 5.4. Advance position by 1.
 
-            $position++;
+            $input->next();
 
             // 5.5 If quoteOrBackslash is U+005C (\), then:
 
             if ('\\' === $quoteOrBackslash) {
                 // 5.5.1. If position is past the end of input, then append U+005C (\) to value and break.
 
-                if ($position >= $length) {
+                if (!$input->valid()) {
                     $value .= '\\';
                     break;
                 }
 
                 // 5.5.2. Append the code point at position within input to value.
 
-                $value .= get_character($input, $position);
+                $value .= $input->current();
 
                 // 5.5.3 Advance position by 1.
 
-                $position++;
+                $input->next();
             } else {
                 // 5.6. Otherwise:
 
@@ -385,6 +346,6 @@ final class MediaType
 
         // 7. Return the code points from positionStart to position, inclusive, within input.
 
-        return mb_substr($value, $positionStart, $position);
+        return mb_substr($value, $positionStart, $input->key());
     }
 }

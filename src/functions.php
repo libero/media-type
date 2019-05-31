@@ -4,57 +4,24 @@ declare(strict_types=1);
 
 namespace Libero\MediaType;
 
-use OutOfBoundsException;
-use function implode;
 use function in_array;
-use function mb_substr;
-use function rtrim;
-use function trim;
 
 /**
  * @internal
  */
-function string_is(string $string, string ...$options) : bool
-{
-    return in_array($string, $options, true);
-}
-
-/**
- * @internal
- */
-function string_will_be(string ...$options) : callable
+function is(string ...$options) : callable
 {
     return static function (string $string) use ($options) : bool {
-        return string_is($string, ...$options);
+        return in_array($string, $options, true);
     };
 }
 
 /**
  * @internal
  */
-function get_character(string $string, int $position) : string
+function not(callable $callable) : callable
 {
-    $character = mb_substr($string, $position, 1);
-
-    if ('' === $character) {
-        throw new OutOfBoundsException('No character at position');
-    }
-
-    return $character;
-}
-
-/**
- * @internal
- */
-function multi_trim(string $string, string ...$characters) : string
-{
-    return trim($string, implode('', $characters));
-}
-
-/**
- * @internal
- */
-function multi_rtrim(string $string, string ...$characters) : string
-{
-    return rtrim($string, implode('', $characters));
+    return static function (...$args) use ($callable) : bool {
+        return !$callable(...$args);
+    };
 }
