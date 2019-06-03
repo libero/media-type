@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Libero\MediaType;
 
+use Iterator;
 use Libero\MediaType\Exception\InvalidMediaType;
 use LogicException;
 use OutOfBoundsException;
@@ -38,12 +39,12 @@ final class MediaType
 
         // 2. Let position be a position variable for input, initially pointing at the start of input.
 
-        $input = new StringIterator($string);
+        $input = iterable_string($string);
 
         // 3. Let type be the result of collecting a sequence of code points that are not U+002F (/) from input, given
         // position.
 
-        $type = $input->sliceUntil(is('/'));
+        $type = read_until($input, is('/'));
 
         // 4. If type is the empty string or does not solely contain HTTP token code points, then return failure.
 
@@ -68,7 +69,7 @@ final class MediaType
         // 7. Let subtype be the result of collecting a sequence of code points that are not U+003B (;) from input,
         // given position.
 
-        $subType = $input->sliceUntil(is(';'));
+        $subType = read_until($input, is(';'));
 
         // 8. Remove any trailing HTTP whitespace from subtype.
 
@@ -100,12 +101,12 @@ final class MediaType
 
             // 11.2. Collect a sequence of code points that are HTTP whitespace from input given position.
 
-            $input->sliceUntil(not(is(' ', "\t", "\n", "\r")));
+            read_until($input, not(is(' ', "\t", "\n", "\r")));
 
             // 11.3. Let parameterName be the result of collecting a sequence of code points that are not U+003B (;) or
             // U+003D (=) from input, given position.
 
-            $parameterName = $input->sliceUntil(is(';', '='));
+            $parameterName = read_until($input, is(';', '='));
 
             // 11.4. Set parameterName to parameterName, in ASCII lowercase.
 
@@ -143,14 +144,14 @@ final class MediaType
 
                 // 11.8.2. Collect a sequence of code points that are not U+003B (;) from input, given position.
 
-                $input->sliceUntil(is(';'));
+                read_until($input, is(';'));
             } else {
                 // 11.9. Otherwise:
 
                 // 11.9.1. Set parameterValue to the result of collecting a sequence of code points that are not
                 // U+003B (;) from input, given position.
 
-                $parameterValue = $input->sliceUntil(is(';'));
+                $parameterValue = read_until($input, is(';'));
 
                 // 11.9.2. Remove any trailing HTTP whitespace from parameterValue.
 
@@ -263,7 +264,10 @@ final class MediaType
         return $this->parameters[$name];
     }
 
-    private static function collectAnHttpQuotedString(StringIterator $input, bool $extractValue = false) : string
+    /**
+     * @param Iterator<int, string> $input
+     */
+    private static function collectAnHttpQuotedString(Iterator $input, bool $extractValue = false) : string
     {
         // 1. Let positionStart be position.
 
@@ -289,7 +293,7 @@ final class MediaType
             // 5.1. Append the result of collecting a sequence of code points that are not U+0022 (") or U+005C (\) from
             // input, given position, to value.
 
-            $value .= $input->sliceUntil(is('"', '\\'));
+            $value .= read_until($input, is('"', '\\'));
 
             // 5.2. If position is past the end of input, then break.
 
