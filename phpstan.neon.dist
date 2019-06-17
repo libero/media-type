@@ -1,4 +1,7 @@
 parameters:
+    ignoreErrors:
+        - message: ~^Strict comparison using .+? between '.+?' and '.+?' will always evaluate to false\.$~
+          path: %currentWorkingDirectory%/src/MediaType.php
     level: max
     paths:
         - bin
